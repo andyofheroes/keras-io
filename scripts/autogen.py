@@ -19,37 +19,54 @@ import signal
 import docstrings
 import jinja2
 import multiprocessing
-import autogen_utils
+import warnings
 
+import autogen_utils
 from master import MASTER
 from examples_master import EXAMPLES_MASTER
 import tutobooks
 import generate_tf_guides
-import render_tags
+import render_presets
 
-try:
-    import keras_nlp
-except Exception as e:
-    print(f"Could not import Keras NLP. Exception: {e}")
-    keras_nlp = None
-
-try:
-    import keras_cv
-except Exception as e:
-    print(f"Could not import Keras CV. Exception: {e}")
-    keras_cv = None
-
+import importlib
 
 EXAMPLES_GH_LOCATION = Path("keras-team") / "keras-io" / "blob" / "master" / "examples"
 GUIDES_GH_LOCATION = Path("keras-team") / "keras-io" / "blob" / "master" / "guides"
 KERAS_TEAM_GH = "https://github.com/keras-team"
-PROJECT_URL = {
-    "keras": f"{KERAS_TEAM_GH}/keras/tree/v3.5.0/",
-    "keras_tuner": f"{KERAS_TEAM_GH}/keras-tuner/tree/v1.4.7/",
-    "keras_cv": f"{KERAS_TEAM_GH}/keras-cv/tree/v0.9.0/",
-    "keras_nlp": f"{KERAS_TEAM_GH}/keras-nlp/tree/v0.14.4/",
-    "tf_keras": f"{KERAS_TEAM_GH}/tf-keras/tree/v2.17.0/",
+
+# Mapping from Python module name to GitHub repo name.
+_MODULE_TO_REPO = {
+    "keras": "keras",
+    "keras_tuner": "keras-tuner",
+    "keras_hub": "keras-hub",
+    "tf_keras": "tf-keras",
+    "keras_rs": "keras-rs",
 }
+
+
+def _build_project_url():
+    """Build PROJECT_URL by reading each package's installed version.
+
+    For stable releases (e.g. "0.31.1"), the URL points to the
+    corresponding GitHub tag (e.g. v0.31.1).
+    For dev/nightly versions (e.g. "0.32.0.dev0"), the URL falls back to
+    the master branch since no tag exists for nightly builds.
+    """
+    project_url = {}
+    for module_name, repo_name in _MODULE_TO_REPO.items():
+        mod = importlib.import_module(module_name)
+        version = mod.__version__
+        if ".dev" in version:
+            ref = "master"
+        else:
+            ref = f"v{version}"
+        project_url[module_name] = (
+            f"{KERAS_TEAM_GH}/{repo_name}/tree/{ref}/"
+        )
+    return project_url
+
+
+PROJECT_URL = _build_project_url()
 USE_MULTIPROCESSING = False
 
 
@@ -105,7 +122,13 @@ class KerasIO:
                         f.close()
                         assert title_line.startswith("Title: ")
                         title = title_line[len("Title: ") :]
-                        children.append({"path": example_path, "title": title.strip()})
+                        children.append(
+                            {
+                                "path": example_path,
+                                "title": title.strip(),
+                                "keras_3": True,
+                            }
+                        )
             entry["children"] = children
 
     def make_md_sources(self):
@@ -120,8 +143,53 @@ class KerasIO:
         )
         self.sync_tutobook_templates()
 
+        # Find all symbols for all guides and examples in MASTER
+        self.find_apis_in_tutobook(MASTER, [])
+
         # Recursively generate all md sources based on the MASTER tree
         self.make_md_source_for_entry(self.master, path_stack=[], title_stack=[])
+
+    def find_apis_in_tutobook(self, entry, path_stack):
+        path = entry["path"]
+        if "children" in entry:
+            # This is a TOC, recurse in tree
+            sub_path_stack = path_stack + [path] if path != "/" else path_stack
+            for child in entry["children"]:
+                self.find_apis_in_tutobook(child, sub_path_stack)
+            return
+        elif "generate" in entry:
+            # This is an API, ignore
+            return
+
+        # This is a guide / example, reverse engineer the path to the Python.
+        url = "/" + str(Path(*path_stack) / path) + "/"
+        is_guide = False
+        if path_stack[0] == "examples/":
+            py_path_stack = [self.examples_dir] + path_stack[1:]
+        elif path_stack[0] == "guides/":
+            py_path_stack = [self.guides_dir] + path_stack[1:]
+            is_guide = True
+        elif len(path_stack) < 2:
+            return
+        elif path_stack[1] == "examples/":
+            py_path_stack = [self.examples_dir, path_stack[0]] + path_stack[2:]
+        elif path_stack[1] == "guides/":
+            py_path_stack = [self.guides_dir, path_stack[0]] + path_stack[2:]
+            is_guide = True
+        else:
+            return
+
+        py_path = os.path.join(*py_path_stack, path + ".py")
+
+        # Parse the Python file and extract all the symbols from Keras packages.
+        apis = autogen_utils.find_all_symbols(
+            py_path, ["keras", "keras_hub", "keras_rs"]
+        )
+        if apis is None:
+            warnings.warn(f"Could not parse '{py_path}'")
+        else:
+            # Provide the results to the docstring_printer.
+            self.docstring_printer.add_example_apis(url, entry["title"], is_guide, apis)
 
     def preprocess_tutobook_md_source(
         self, md_content, fname, github_repo_dir, img_dir, site_img_dir
@@ -155,13 +223,6 @@ class KerasIO:
         )
         # Insert --- before H2 titles
         md_content = md_content.replace("\n## ", "\n---\n## ")
-        # Clean up progress bar output
-        if "[1m" in md_content:
-            md_content = md_content.replace("[1m", " ")
-            md_content = md_content.replace("[0m [32m", " ")
-            md_content = md_content.replace("[0m[37m[0m [1m", " ")
-            md_content = md_content.replace("[0m", "")
-            md_content = md_content.replace("[37m ", "")
         return md_content
 
     def make_tutobook_sources_for_directory(
@@ -365,23 +426,49 @@ class KerasIO:
             Path(self.templates_dir) / "guides",
             ext=".md",
         )
-        # Special cases
+        # Special cases.
+        # - Copy the Keras intro guide to /getting_started/.
+        # - Copy the KerasHub guides to /keras_hub/.
+        # - Copy the KerasTuner guides to /keras_tuner/.
+        templates_path = Path(self.templates_dir)
         shutil.copyfile(
-            Path(self.templates_dir) / "guides" / "intro_to_keras_for_engineers.md",
-            Path(self.templates_dir)
-            / "getting_started"
-            / "intro_to_keras_for_engineers.md",
+            templates_path / "guides" / "intro_to_keras_for_engineers.md",
+            templates_path / "getting_started" / "intro_to_keras_for_engineers.md",
+        )
+        shutil.copyfile(
+            templates_path / "guides" / "keras_hub" / "getting_started.md",
+            templates_path / "keras_hub" / "getting_started.md",
+        )
+        shutil.copyfile(
+            templates_path / "guides" / "keras_tuner" / "getting_started.md",
+            templates_path / "keras_tuner" / "getting_started.md",
+        )
+        shutil.copytree(
+            templates_path / "guides" / "keras_hub",
+            templates_path / "keras_hub" / "guides",
+            dirs_exist_ok=True,
+        )
+        shutil.copytree(
+            templates_path / "guides" / "keras_tuner",
+            templates_path / "keras_tuner" / "guides",
+            dirs_exist_ok=True,
         )
 
         # Examples
         for dir_name in os.listdir(Path(self.examples_dir)):
             dir_path = Path(self.examples_dir) / dir_name  # e.g. examples/nlp
             if os.path.isdir(dir_path):
-                dst_dir = Path(self.templates_dir) / "examples" / dir_name
+                dst_dir = templates_path / "examples" / dir_name
                 if os.path.exists(dst_dir):
                     shutil.rmtree(dst_dir)
                 os.makedirs(dst_dir)
                 copy_inner_contents(dir_path / "md", dst_dir, ext=".md")
+
+        shutil.copytree(
+            templates_path / "examples" / "keras_rs",
+            templates_path / "keras_rs" / "examples",
+            dirs_exist_ok=True,
+        )
 
         # Examples touch-up: add Keras version banner to each example
         example_name_to_version = {}
@@ -394,9 +481,9 @@ class KerasIO:
                 else:
                     version = 2
                 example_name_to_version[example_name] = version
-        for section_name in os.listdir(Path(self.templates_dir) / "examples"):
+        for section_name in os.listdir(templates_path / "examples"):
             # e.g. templates/examples/nlp
-            dir_path = Path(self.templates_dir) / "examples" / section_name
+            dir_path = templates_path / "examples" / section_name
             if not os.path.isdir(dir_path):
                 continue
             for example_fname in os.listdir(dir_path):
@@ -411,10 +498,11 @@ class KerasIO:
                     md_content_lines = md_content.split("\n")
                     for i, line in enumerate(md_content_lines):
                         if "View in Colab" in line:
-                            md_content_lines.insert(
-                                i,
-                                f"<div class='example_version_banner keras_{version}'>ⓘ This example uses Keras {version}</div>",
-                            )
+                            if version == 2:
+                                banner_text = f"<div class='example_version_banner keras_{version}'>ⓘ This example uses Keras {version}. This example may not be compatible with the latest version of Keras. Please check out all of our <a href=\"https://keras.io/examples/\">Keras 3 examples here</a>.</div>"
+                            else:
+                                banner_text = f"<div class='example_version_banner keras_{version}'>ⓘ This example uses Keras {version}</div>"
+                            md_content_lines.insert(i, banner_text)
                             break
                     md_content = "\n".join(md_content_lines) + "\n"
                     with open(md_path, "w") as f:
@@ -519,6 +607,7 @@ class KerasIO:
             generated_md = ""
             for element in generate:
                 generated_md += self.docstring_printer.render(element)
+
             if "{{autogenerated}}" not in template:
                 raise RuntimeError(
                     "Template found for %s but missing "
@@ -539,10 +628,8 @@ class KerasIO:
                     "missing {{toc}} tag." % (template_path,)
                 )
             template = template.replace("{{toc}}", toc)
-        if "keras_nlp/" in path_stack and "models/" in path_stack:
-            template = render_tags.render_tags(template, keras_nlp)
-        if "keras_cv/" in path_stack and "models/" in path_stack:
-            template = render_tags.render_tags(template, keras_cv)
+        if "keras_hub/" in path_stack:
+            template = render_presets.render_tags(template)
         source_path = Path(self.md_sources_dir) / Path(*path_stack)
         if path.endswith("/"):
             md_source_path = source_path / "index.md"
@@ -586,7 +673,7 @@ class KerasIO:
             for entry in children:
                 self.make_md_source_for_entry(entry, path_stack[:], title_stack[:])
 
-    def make_map_of_symbol_names_to_api_urls(self):
+    def make_symbol_to_link_map(self):
         def recursive_make_map(entry, current_url):
             current_url /= entry["path"]
             entry_map = {}
@@ -608,9 +695,12 @@ class KerasIO:
                     entry_map.update(recursive_make_map(child, current_url))
             return entry_map
 
-        self._map_of_symbol_names_to_api_urls = recursive_make_map(
-            self.master, Path("")
-        )
+        urls = recursive_make_map(self.master, Path(""))
+        self._symbol_to_link_map = {}
+        for key, value in urls.items():
+            symbol = f"`{key}`"
+            link = f"[{symbol}]({value})"
+            self._symbol_to_link_map[symbol] = link
 
     def generate_examples_landing_page(self):
         """Create the html file /examples/index.html.
@@ -638,6 +728,9 @@ class KerasIO:
             examples_by_subcategory = {}
             subcategory_names = []
             for example in examples_by_category[category_name]:
+                # Skip rendering for Keras 2 examples
+                if example.get("keras_2"):
+                    continue
                 subcategory_name = example.get("subcategory", "Other")
                 if subcategory_name not in examples_by_subcategory:
                     examples_by_subcategory[subcategory_name] = []
@@ -645,14 +738,15 @@ class KerasIO:
                 example["path"] = "/examples/" + category_path + example["path"]
                 examples_by_subcategory[subcategory_name].append(example)
 
-            subcategories_to_render = []
-            for subcategory_name in subcategory_names:
-                subcategories_to_render.append(
-                    {
-                        "title": subcategory_name,
-                        "examples": examples_by_subcategory[subcategory_name],
-                    }
-                )
+            # Build subcategories
+            subcategories_to_render = [
+                {"title": name, "examples": examples_by_subcategory[name]}
+                for name in subcategory_names
+            ]
+
+            # If nothing remains after filtering, skip this category
+            if not subcategories_to_render:
+                continue
 
             category_dict = {
                 "title": category_name,
@@ -732,7 +826,7 @@ class KerasIO:
             )
 
     def render_md_sources_to_html(self):
-        self.make_map_of_symbol_names_to_api_urls()
+        self.make_symbol_to_link_map()
         print("Rendering md sources to HTML")
         base_template = jinja2.Template(open(Path(self.theme_dir) / "base.html").read())
         docs_template = jinja2.Template(open(Path(self.theme_dir) / "docs.html").read())
@@ -766,9 +860,11 @@ class KerasIO:
                     print("...Rendering", fname)
                     self.render_single_file(src_location, fname, self.nav)
 
-        # Images & css
+        # Images & css & js
+        shutil.copytree(Path(self.theme_dir) / "js", Path(self.site_dir) / "js")
         shutil.copytree(Path(self.theme_dir) / "css", Path(self.site_dir) / "css")
         shutil.copytree(Path(self.theme_dir) / "img", Path(self.site_dir) / "img")
+        shutil.copytree(Path(self.theme_dir) / "icons", Path(self.site_dir) / "icons")
 
         # Landing page
         landing_template = jinja2.Template(
@@ -833,11 +929,32 @@ class KerasIO:
         sitemap = "\n".join(all_urls_list) + "\n"
         autogen_utils.save_file(Path(self.site_dir) / "sitemap.txt", sitemap)
 
-        # Redirects
-        shutil.copytree(self.redirects_dir, self.site_dir, dirs_exist_ok=True)
-
         # Examples landing page
         self.generate_examples_landing_page()
+
+        # Redirects
+        self.check_redirects()
+        shutil.copytree(self.redirects_dir, self.site_dir, dirs_exist_ok=True)
+
+    def check_redirects(self):
+        """Validate our redirects"""
+        for file in Path(self.redirects_dir).glob("**/*.html"):
+            with open(file) as f:
+                content = f.read()
+                # Read url.
+                url = content[content.find("URL=") + 5 :]
+                url = url[: url.find("'")]
+                # Strip to path.
+                path = url.replace("https://keras.io/", "")
+                target = Path(self.site_dir) / Path(path)
+                if not target.exists():
+                    raise ValueError(
+                        f"Redirect target {path} does not exist referenced "
+                        f"from file {file}."
+                    )
+            site_path = Path(self.site_dir) / file.relative_to(self.redirects_dir)
+            if site_path.exists():
+                raise ValueError(f"Redirect at {file} would overwrite a real page.")
 
     def render_single_file(self, src_location, fname, nav):
         if not fname.endswith(".md"):
@@ -878,12 +995,8 @@ class KerasIO:
         md_content = replace_links(md_content)
 
         # Convert Keras symbols to links to the Keras docs
-        for symbol, symbol_url in self._map_of_symbol_names_to_api_urls.items():
-            md_content = re.sub(
-                r"`((tf\.|)" + symbol + ")`",
-                r"[`\1`](" + symbol_url + ")",
-                md_content,
-            )
+        for symbol, link in self._symbol_to_link_map.items():
+            md_content = md_content.replace(symbol, link)
 
         # Convert TF symbols to links to tensorflow.org
         tmp_content = copy.copy(md_content)
@@ -1025,6 +1138,8 @@ def copy_inner_contents(src, dst, ext=".md"):
         if fname.endswith(ext):
             shutil.copyfile(fpath, fdst)
         if os.path.isdir(fpath):
+            if not os.path.exists(fdst):
+                os.mkdir(fdst)
             copy_inner_contents(fpath, fdst, ext)
 
 

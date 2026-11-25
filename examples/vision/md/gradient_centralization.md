@@ -140,27 +140,28 @@ In this section we will define a Convolutional neural network.
 
 
 ```python
-model = keras.Sequential(
-    [
-        layers.Input(shape=input_shape),
-        layers.Conv2D(16, (3, 3), activation="relu"),
-        layers.MaxPooling2D(2, 2),
-        layers.Conv2D(32, (3, 3), activation="relu"),
-        layers.Dropout(0.5),
-        layers.MaxPooling2D(2, 2),
-        layers.Conv2D(64, (3, 3), activation="relu"),
-        layers.Dropout(0.5),
-        layers.MaxPooling2D(2, 2),
-        layers.Conv2D(64, (3, 3), activation="relu"),
-        layers.MaxPooling2D(2, 2),
-        layers.Conv2D(64, (3, 3), activation="relu"),
-        layers.MaxPooling2D(2, 2),
-        layers.Flatten(),
-        layers.Dropout(0.5),
-        layers.Dense(512, activation="relu"),
-        layers.Dense(1, activation="sigmoid"),
-    ]
-)
+def make_model():
+    return keras.Sequential(
+        [
+            layers.Input(shape=input_shape),
+            layers.Conv2D(16, (3, 3), activation="relu"),
+            layers.MaxPooling2D(2, 2),
+            layers.Conv2D(32, (3, 3), activation="relu"),
+            layers.Dropout(0.5),
+            layers.MaxPooling2D(2, 2),
+            layers.Conv2D(64, (3, 3), activation="relu"),
+            layers.Dropout(0.5),
+            layers.MaxPooling2D(2, 2),
+            layers.Conv2D(64, (3, 3), activation="relu"),
+            layers.MaxPooling2D(2, 2),
+            layers.Conv2D(64, (3, 3), activation="relu"),
+            layers.MaxPooling2D(2, 2),
+            layers.Flatten(),
+            layers.Dropout(0.5),
+            layers.Dense(512, activation="relu"),
+            layers.Dense(1, activation="sigmoid"),
+        ]
+    )
 ```
 
 ---
@@ -170,7 +171,7 @@ We will now
 subclass the `RMSProp` optimizer class modifying the
 `keras.optimizers.Optimizer.get_gradients()` method where we now implement Gradient
 Centralization. On a high level the idea is that let us say we obtain our gradients
-through back propogation for a Dense or Convolution layer we then compute the mean of the
+through back propagation for a Dense or Convolution layer we then compute the mean of the
 column vectors of the weight matrix, and then remove the mean from each column vector.
 
 The experiments in [this paper](https://arxiv.org/abs/2004.01461) on various
@@ -240,6 +241,7 @@ compare to the training performance of the model trained with Gradient Centraliz
 
 ```python
 time_callback_no_gc = TimeHistory()
+model = make_model()
 model.compile(
     loss="binary_crossentropy",
     optimizer=RMSprop(learning_rate=1e-4),
@@ -357,6 +359,7 @@ notice our optimizer is the one using Gradient Centralization this time.
 
 ```python
 time_callback_gc = TimeHistory()
+model = make_model()
 model.compile(loss="binary_crossentropy", optimizer=optimizer, metrics=["accuracy"])
 
 model.summary()
@@ -472,14 +475,13 @@ print(f"Training Time: {sum(time_callback_gc.times)}")
 <div class="k-default-codeblock">
 ```
 Not using Gradient Centralization
-Loss: 0.5345584154129028
-Accuracy: 0.7604166865348816
-Training Time: 112.48799777030945
+Loss: 0.5709779858589172
+Accuracy: 0.7380720376968384
+Training Time: 30.397282361984253
 Using Gradient Centralization
-Loss: 0.4014038145542145
-Accuracy: 0.8153935074806213
-Training Time: 98.31573963165283
-
+Loss: 0.5860965847969055
+Accuracy: 0.7039921879768372
+Training Time: 26.152544498443604
 ```
 </div>
 Readers are encouraged to try out Gradient Centralization on different datasets from

@@ -30,7 +30,7 @@ as proposed in the paper, "Attention is All You Need".
 - [LJSpeech Dataset](https://keithito.com/LJ-Speech-Dataset/)
 """
 
-
+import re
 import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
@@ -39,7 +39,6 @@ from glob import glob
 import tensorflow as tf
 import keras
 from keras import layers
-
 
 """
 ## Define the Transformer Input Layer
@@ -247,7 +246,7 @@ class Transformer(keras.Model):
             preds = self([source, dec_input])
             one_hot = tf.one_hot(dec_target, depth=self.num_classes)
             mask = tf.math.logical_not(tf.math.equal(dec_target, 0))
-            loss = model.compute_loss(None, one_hot, preds, sample_weight=mask)
+            loss = self.compute_loss(None, one_hot, preds, sample_weight=mask)
         trainable_vars = self.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
@@ -262,7 +261,7 @@ class Transformer(keras.Model):
         preds = self([source, dec_input])
         one_hot = tf.one_hot(dec_target, depth=self.num_classes)
         mask = tf.math.logical_not(tf.math.equal(dec_target, 0))
-        loss = model.compute_loss(None, one_hot, preds, sample_weight=mask)
+        loss = self.compute_loss(None, one_hot, preds, sample_weight=mask)
         self.loss_metric.update_state(loss)
         return {"loss": self.loss_metric.result()}
 
@@ -289,6 +288,8 @@ Note: This requires ~3.6 GB of disk space and
 takes ~5 minutes for the extraction of files.
 """
 
+pattern_wav_name = re.compile(r"([^/\\\.]+)")
+
 keras.utils.get_file(
     os.path.join(os.getcwd(), "data.tar.gz"),
     "https://data.keithito.com/data/speech/LJSpeech-1.1.tar.bz2",
@@ -313,7 +314,7 @@ def get_data(wavs, id_to_text, maxlen=50):
     """returns mapping of audio paths and transcription texts"""
     data = []
     for w in wavs:
-        id = w.split("/")[-1].split(".")[0]
+        id = pattern_wav_name.split(w)[-4]
         if len(id_to_text[id]) < maxlen:
             data.append({"audio": w, "text": id_to_text[id]})
     return data

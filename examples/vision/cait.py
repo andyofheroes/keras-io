@@ -790,7 +790,7 @@ as well as
 ## Load a pretrained model
 """
 
-model_gcs_path = "gs://tfhub-modules/sayakpaul/cait_xxs24_224/1/uncompressed"
+model_gcs_path = "gs://kaggle-tfhub-models-uncompressed/tfhub-modules/sayakpaul/cait_xxs24_224/1/uncompressed"
 pretrained_model = keras.Sequential(
     [keras.layers.TFSMLayer(model_gcs_path, call_endpoint="serving_default")]
 )
@@ -1028,4 +1028,10 @@ and people develop interesting methods to probe what models like ViT learn.
 
 Thanks to the ML Developer Programs team at Google providing Google Cloud Platform
 support.
+"""
+
+"""
+## Relevant Chapters from Deep Learning with Python
+- [Chapter 8: Image classification](https://deeplearningwithpython.io/chapters/chapter08_image-classification)
+- [Chapter 15: Language models and the Transformer](https://deeplearningwithpython.io/chapters/chapter15_language-models-and-the-transformer)
 """

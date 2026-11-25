@@ -672,8 +672,8 @@ See the following guides:
 
 ### What's the difference between `Model` methods `predict()` and `__call__()`?
 
-Let's answer with an extract from
-[Deep Learning with Python, Second Edition](https://www.manning.com/books/deep-learning-with-python-second-edition?a_aid=keras):
+Let's answer with an extract from the book
+[Deep Learning with Python](https://deeplearningwithpython.io/):
 
 > Both `y = model.predict(x)` and `y = model(x)` (where `x` is an array of input data)
 > mean "run the model on `x` and retrieve the output `y`." Yet they aren't exactly
@@ -748,7 +748,7 @@ intermediate_output = intermediate_layer_model(data)
 ### How can I use pre-trained models in Keras?
 
 You could leverage the [models available in `keras.applications`](/api/applications/),
-or the models available in [KerasCV](/keras_cv/) and [KerasNLP](/keras_nlp/).
+or the models available in [KerasCV](/keras_cv/) and [KerasHub](/keras_hub/).
 
 
 ---

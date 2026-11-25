@@ -416,7 +416,7 @@ Using class weights, the model will tend to give a higher weight to the rare cla
 ```python
 
 def compute_class_weights(labels):
-    # Count number of postive and negative bags.
+    # Count number of positive and negative bags.
     negative_count = len(np.where(labels == 0)[0])
     positive_count = len(np.where(labels == 1)[0])
     total_count = negative_count + positive_count
@@ -681,3 +681,7 @@ the regularization techniques are necessary.
 bag sizes are fixed here.
 - In order not to rely on the random initial weights of a single model, averaging ensemble
 methods should be considered.
+
+---
+## Relevant Chapters from Deep Learning with Python
+- [Chapter 8: Image classification](https://deeplearningwithpython.io/chapters/chapter08_image-classification)

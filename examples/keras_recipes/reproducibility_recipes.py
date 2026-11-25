@@ -151,8 +151,13 @@ def train_model(train_data: tf.data.Dataset, test_data: tf.data.Dataset) -> dict
     )
 
     model.compile(
-        optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"]
+        optimizer="adam",
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+        jit_compile=False,
     )
+    # jit_compile's default value is "auto" which will cause some problems in some
+    # ops, therefore it's set to False.
 
     # model.fit has a `shuffle` parameter which has a default value of `True`.
     # If you are using array-like objects, this will shuffle the data before
@@ -288,4 +293,9 @@ as using `recurrent_dropout` in RNN layers.
 
 Reproducibility is subject to the environment. You'll get the same results if you
 run the notebook or the code on the same machine with the same environment.
+"""
+
+"""
+## Relevant Chapters from Deep Learning with Python
+- [Chapter 6: The universal workflow of machine learning](https://deeplearningwithpython.io/chapters/chapter06_universal-workflow-of-ml)
 """

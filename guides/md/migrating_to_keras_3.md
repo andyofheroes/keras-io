@@ -38,7 +38,7 @@ and click "Restart runtime" in Colab, and your code will run on the JAX or PyTor
 !pip install -q keras-nightly
 ```
 
-    
+
 ```python
 import os
 
@@ -178,7 +178,7 @@ INFO:tensorflow:Assets written to: saved_model/assets
 Saved artifact at 'saved_model'. The following endpoints are available:
 ```
 </div>
-    
+
 <div class="k-default-codeblock">
 ```
 * Endpoint 'serve'
@@ -730,6 +730,44 @@ methods. This argument had very low usage.
 * The `keras.constraints.RadialConstraint` object is removed. This object had very low usage.
 
 ---
+## Using Keras 2 (legacy)
+
+If you still need to run legacy Keras 2 code, here is how Keras 2 relates to your
+TensorFlow installation.
+
+From TensorFlow 2.0 to TensorFlow 2.15 (included), doing `pip install tensorflow` will also
+install the corresponding version of Keras 2 -- for instance, `pip install tensorflow==2.14.0` will
+install `keras==2.14.0`. That version of Keras is then available via both `import keras` and `from tensorflow import keras`
+(the `tf.keras` namespace). If you install TensorFlow 2.15 and want Keras 3, you should reinstall
+Keras 3 afterwards, since `tensorflow==2.15` will overwrite your Keras installation with `keras==2.15`.
+
+Starting with TensorFlow 2.16, doing `pip install tensorflow` will install Keras 3. When you have TensorFlow >= 2.16
+and Keras 3, then by default `from tensorflow import keras` (`tf.keras`) will be Keras 3.
+
+Meanwhile, the legacy Keras 2 package is still being released regularly and is available on PyPI as `tf_keras`
+(or equivalently `tf-keras` -- note that `-` and `_` are equivalent in PyPI package names).
+To use it, you can install it via `pip install tf_keras` then import it via `import tf_keras as keras`.
+
+Should you want `tf.keras` to stay on Keras 2 after upgrading to TensorFlow 2.16+, you can configure your TensorFlow installation
+so that `tf.keras` points to `tf_keras`. To achieve this:
+
+1. Make sure to install `tf_keras`. Note that TensorFlow does not install it by default.
+2. Export the environment variable `TF_USE_LEGACY_KERAS=1`.
+
+There are several ways to export the environment variable:
+
+1. You can simply run the shell command `export TF_USE_LEGACY_KERAS=1` before launching the Python interpreter.
+2. You can add `export TF_USE_LEGACY_KERAS=1` to your `.bashrc` file. That way the variable will still be exported when you restart your shell.
+3. You can start your Python script with:
+
+```python
+import os
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
+```
+
+These lines would need to be before any `import tensorflow` statement.
+
+---
 ## Transitioning to backend-agnostic Keras 3
 
 Keras 3 code with the TensorFlow backend will work with native TensorFlow APIs.
@@ -815,6 +853,8 @@ are usually named the same in both frameworks (e.g. `reshape`, `matmul`, `cast`,
 | `tf.tensor_scatter_nd_update`                      | `keras.ops.slice_update`                                          |
 | `tf.signal.fft2d`                                  | `keras.ops.fft2`                                                  |
 | `tf.signal.inverse_stft`                           | `keras.ops.istft`                                                 |
+| `tf.image.crop_to_bounding_box`                    | `keras.ops.image.crop_images`                                     |
+| `tf.image.pad_to_bounding_box`                     | `keras.ops.image.pad_images`                                      |
 
 ### Custom `train_step()` methods
 

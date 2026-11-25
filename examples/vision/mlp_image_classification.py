@@ -281,7 +281,7 @@ class MLPMixerLayer(layers.Layer):
         x_channels = keras.ops.transpose(x, axes=(0, 2, 1))
         # Apply mlp1 on each channel independently.
         mlp1_outputs = self.mlp1(x_channels)
-        # Transpose mlp1_outputs from [num_batches, hidden_dim, num_patches] to [num_batches, num_patches, hidden_units].
+        # Transpose mlp1_outputs from [num_batches, hidden_units, num_patches] to [num_batches, num_patches, hidden_units].
         mlp1_outputs = keras.ops.transpose(mlp1_outputs, axes=(0, 2, 1))
         # Add skip connection.
         x = mlp1_outputs + inputs
@@ -473,4 +473,9 @@ increasing the number of gMLP blocks, and training the model for longer.
 You may also try to increase the size of the input images and use different patch sizes.
 Note that, the paper used advanced regularization strategies, such as MixUp and CutMix,
 as well as AutoAugment.
+"""
+
+"""
+## Relevant Chapters from Deep Learning with Python
+- [Chapter 8: Image classification](https://deeplearningwithpython.io/chapters/chapter08_image-classification)
 """

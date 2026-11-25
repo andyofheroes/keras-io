@@ -137,7 +137,7 @@ print(generator_in_channels, discriminator_in_channels)
 ## Creating the discriminator and generator
 
 The model definitions (`discriminator`, `generator`, and `ConditionalGAN`) have been
-adapted from [this example](https://keras.io/guides/customizing_what_happens_in_fit/).
+adapted from [this example](https://keras.io/guides/custom_train_step_in_tensorflow/).
 
 
 ```python
@@ -431,3 +431,7 @@ Conditional generation is also widely used in many modern image generation archi
 etc.
 
 You can use the trained model hosted on [Hugging Face Hub](https://huggingface.co/keras-io/conditional-gan) and try the demo on [Hugging Face Spaces](https://huggingface.co/spaces/keras-io/conditional-GAN).
+
+---
+## Relevant Chapters from Deep Learning with Python
+- [Chapter 17: Image generation](https://deeplearningwithpython.io/chapters/chapter17_image-generation)

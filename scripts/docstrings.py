@@ -1,5 +1,4 @@
-"""Lightweight fork of Keras-Autodocs.
-"""
+"""Lightweight fork of Keras-Autodocs."""
 
 import warnings
 import black
@@ -7,13 +6,28 @@ import re
 import inspect
 import importlib
 import itertools
+from collections import defaultdict
+from collections import namedtuple
 
-import render_tags
+
+import render_presets
+
+
+# Maximum number of links to guides and examples
+MAX_EXAMPLE_LINKS = 8
+
+ExampleInfo = namedtuple("ExampleInfo", ["url", "title", "is_guide"])
 
 
 class KerasDocumentationGenerator:
     def __init__(self, project_url=None):
         self.project_url = project_url
+        self.api_to_example = defaultdict(list)
+
+    def add_example_apis(self, url, title, is_guide, apis):
+        example = ExampleInfo(url, title, is_guide)
+        for api in apis:
+            self.api_to_example[api].append(example)
 
     def process_docstring(self, docstring):
         docstring = docstring.replace("Args:", "# Arguments")
@@ -94,11 +108,26 @@ class KerasDocumentationGenerator:
         if docstring:
             docstring = self.process_docstring(docstring)
             subblocks.append(docstring)
-        # Render preset table for KerasCV and KerasNLP
+        # Render preset table for KerasCV and KerasHub
         if element.endswith("from_preset"):
-            table = render_tags.render_table(import_object(element.rsplit(".", 1)[0]))
+            table = render_presets.render_table(
+                import_object(element.rsplit(".", 1)[0])
+            )
             if table is not None:
                 subblocks.append(table)
+
+        # Extract and render links to examples using the API
+        apis = getattr(object_, "_api_export_path", [element])
+
+        all_examples = []
+        for api in apis:
+            for api_example in self.api_to_example.get(api, []):
+                if api_example not in all_examples:
+                    all_examples.append(api_example)
+
+        if all_examples:
+            subblocks.append(get_examples_block(element, all_examples))
+
         return "\n\n".join(subblocks) + "\n\n----\n\n"
 
 
@@ -131,16 +160,10 @@ def make_source_link(cls, project_url):
         return None
 
     base_module = cls.__module__.split(".")[0]
+    if base_module not in project_url:
+        return None
     project_url = project_url[base_module]
     assert project_url.endswith("/"), f"{base_module} not found"
-    project_url_version = project_url.split("/")[-2].removeprefix("v")
-    module_version = importlib.import_module(base_module).__version__
-    if module_version != project_url_version:
-        raise RuntimeError(
-            f"For project {base_module}, URL {project_url} "
-            f"has version number {project_url_version} which does not match the "
-            f"current imported package version {module_version}"
-        )
     path = cls.__module__.replace(".", "/")
     if base_module in ("tf_keras",):
         path = path.replace("/src/", "/")
@@ -150,6 +173,7 @@ def make_source_link(cls, project_url):
         f"[[source]]({project_url}{path}.py#L{line})"
         f"</span>"
     )
+
 
 
 def code_snippet(snippet):
@@ -184,6 +208,69 @@ def get_function_name(function):
     return function.__name__
 
 
+def get_default_value_for_repr(value):
+    """Return a substitute for rendering the default value of a funciton arg.
+
+    Function and object instances are rendered as <Foo object at 0x00000000>
+    which can't be parsed by black. We substitute functions with the function
+    name and objects with a rendered version of the constructor like
+    `Foo(a=2, b="bar")`.
+
+    Args:
+        value: The value to find a better rendering of.
+
+    Returns:
+        Another value or `None` if no substitution is needed.
+    """
+
+    class ReprWrapper:
+        def __init__(self, representation):
+            self.representation = representation
+
+        def __repr__(self):
+            return self.representation
+
+    if value is inspect._empty:
+        return None
+
+    if inspect.isfunction(value):
+        # Render the function name instead
+        return ReprWrapper(value.__name__)
+
+    if inspect.isclass(value):
+        # Render classes as module.ClassName to produce a valid python
+        # dotted-name expression in the fake signature (black can parse it).
+        return ReprWrapper(value.__module__ + "." + value.__name__)
+
+    if (
+        repr(value).startswith("<")  # <Foo object at 0x00000000>
+        and hasattr(value, "__class__")  # it is an object
+        and hasattr(value, "get_config")  # it is a Keras object
+    ):
+        config = value.get_config()
+        init_args = []  # The __init__ arguments to render
+        for p in inspect.signature(value.__class__.__init__).parameters.values():
+            if p.name == "self":
+                continue
+            if p.kind == inspect.Parameter.POSITIONAL_ONLY:
+                # Required positional, render without a name
+                init_args.append(repr(config[p.name]))
+            elif p.default is inspect._empty or p.default != config[p.name]:
+                # Keyword arg with non-default value, render
+                init_args.append(p.name + "=" + repr(config[p.name]))
+            # else don't render that argument
+        return ReprWrapper(
+            value.__class__.__module__
+            + "."
+            + value.__class__.__name__
+            + "("
+            + ", ".join(init_args)
+            + ")"
+        )
+
+    return None
+
+
 def get_signature_start(function):
     """For the Dense layer, it should return the string 'keras.layers.Dense'"""
     if ismethod(function):
@@ -202,7 +289,18 @@ def get_signature_start(function):
 
 def get_signature_end(function):
     params = inspect.signature(function).parameters.values()
-    signature_end = "(" + ", ".join([str(x) for x in params]) + ")"
+
+    formatted_params = []
+    for x in params:
+        default = get_default_value_for_repr(x.default)
+        if default:
+            x = inspect.Parameter(
+                x.name, x.kind, default=default, annotation=x.annotation
+            )
+        str_x = str(x)
+        formatted_params.append(str_x)
+    signature_end = "(" + ", ".join(formatted_params) + ")"
+
     if ismethod(function):
         signature_end = signature_end.replace("(self, ", "(")
         signature_end = signature_end.replace("(self)", "()")
@@ -291,6 +389,27 @@ def get_section_end(docstring, section_start):
         return section_end - 2
 
 
+def get_examples_block(name, guides_and_examples):
+    # Prefer guides to examples, so put them first.
+    # But we otherwise keep the order, which is the order in the TOC.
+    guides = [e for e in guides_and_examples if e.is_guide]
+    examples = [e for e in guides_and_examples if not e.is_guide]
+    guides_and_examples = guides + examples
+
+    # Cap the number of links.
+    if len(guides_and_examples) > MAX_EXAMPLE_LINKS:
+        guides_and_examples = guides_and_examples[:MAX_EXAMPLE_LINKS]
+
+    # Remove module in name.
+    name = name.split(".")[-1]
+
+    return (
+        f"**Guides and examples using `{name}`**\n\n"
+        + "\n".join([f"- [{e.title}]({e.url})" for e in guides_and_examples])
+        + "\n"
+    )
+
+
 def get_google_style_sections_without_code(docstring):
     regex_indented_sections_start = re.compile(r"\n# .+?\n")
     google_style_sections = {}
@@ -370,10 +489,8 @@ def get_class_from_method(meth):
                 return cls
         meth = meth.__func__  # fallback to __qualname__ parsing
     if inspect.isfunction(meth):
-        cls = getattr(
-            inspect.getmodule(meth),
-            meth.__qualname__.split(".<locals>", 1)[0].rsplit(".", 1)[0],
-        )
+        cls_name = meth.__qualname__.split(".<locals>", 1)[0].rsplit(".", 1)[0]
+        cls = getattr(inspect.getmodule(meth), cls_name, None)
         if isinstance(cls, type):
             return cls
     return getattr(meth, "__objclass__", None)  # handle special descriptor objects

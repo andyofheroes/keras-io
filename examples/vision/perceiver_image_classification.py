@@ -134,7 +134,7 @@ class Patches(layers.Layer):
     def call(self, images):
         batch_size = ops.shape(images)[0]
         patches = ops.image.extract_patches(
-            image=images,
+            images=images,
             size=(self.patch_size, self.patch_size),
             strides=(self.patch_size, self.patch_size),
             dilation_rate=1,
@@ -466,4 +466,9 @@ and use different patch sizes.
 
 The Perceiver benefits from inceasing the model size. However, larger models needs bigger accelerators
 to fit in and train efficiently. This is why in the Perceiver paper they used 32 TPU cores to run the experiments.
+"""
+
+"""
+## Relevant Chapters from Deep Learning with Python
+- [Chapter 8: Image classification](https://deeplearningwithpython.io/chapters/chapter08_image-classification)
 """
